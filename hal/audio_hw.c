@@ -517,11 +517,17 @@ static bool is_supported_format(audio_format_t format)
         format == AUDIO_FORMAT_DTS_HD ||
         format == AUDIO_FORMAT_FLAC ||
         format == AUDIO_FORMAT_ALAC ||
+#ifdef APE_OFFLOAD_ENABLED
         format == AUDIO_FORMAT_APE ||
+#endif
         format == AUDIO_FORMAT_DSD ||
+#ifdef VORBIS_OFFLOAD_ENABLED
         format == AUDIO_FORMAT_VORBIS ||
+#endif
+#ifdef WMA_OFFLOAD_ENABLED
         format == AUDIO_FORMAT_WMA ||
         format == AUDIO_FORMAT_WMA_PRO ||
+#endif
         format == AUDIO_FORMAT_APTX)
            return true;
 
