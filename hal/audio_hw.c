@@ -428,12 +428,9 @@ bool audio_hw_send_gain_dep_calibration(int level) {
         pthread_mutex_lock(&adev->lock);
         ret_val = platform_send_gain_dep_cal(adev->platform, level);
 
-        // if cal set fails, cache level info
-        // if cal set succeds, reset known last cal set
-        if (!ret_val)
-            last_known_cal_step = level;
-        else if (last_known_cal_step != -1)
-            last_known_cal_step = -1;
+        // cache level info for any of the use case which
+        // was not started.
+        last_known_cal_step = level;;
 
         pthread_mutex_unlock(&adev->lock);
     } else {
@@ -1247,7 +1244,7 @@ static void check_usecases_capture_codec_backend(struct audio_device *adev,
                     /* Update voc calibration before enabling VoIP route */
                     if (usecase->type == VOIP_CALL)
                         status = platform_switch_voice_call_device_post(adev->platform,
-                                                                        usecase->out_snd_device,
+                                                                        platform_get_output_snd_device(adev->platform, uc_info->stream.out),
                                                                         usecase->in_snd_device);
                     enable_audio_route(adev, usecase);
                 }
@@ -3261,6 +3258,7 @@ static ssize_t out_write(struct audio_stream_out *stream, const void *buffer,
         if (last_known_cal_step != -1) {
             ALOGD("%s: retry previous failed cal level set", __func__);
             audio_hw_send_gain_dep_calibration(last_known_cal_step);
+            last_known_cal_step = -1;
         }
     }
 
