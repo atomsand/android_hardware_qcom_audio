@@ -72,6 +72,7 @@
 #include <platform.h>
 #include "audio_extn.h"
 #include "voice_extn.h"
+#include "ultrasound.h"
 
 #include "sound/compress_params.h"
 #include "sound/asound.h"
@@ -259,6 +260,8 @@ const char * const use_case_table[AUDIO_USECASE_MAX] = {
     [USECASE_AUDIO_PLAYBACK_AFE_PROXY] = "afe-proxy-playback",
     [USECASE_AUDIO_RECORD_AFE_PROXY] = "afe-proxy-record",
     [USECASE_AUDIO_PLAYBACK_EXT_DISP_SILENCE] = "silence-playback",
+    [USECASE_AUDIO_ULTRASOUND_RX] = "ultrasound-rx",
+    [USECASE_AUDIO_ULTRASOUND_TX] = "ultrasound-tx",
 };
 
 static const audio_usecase_t offload_usecases[] = {
@@ -728,6 +731,10 @@ int enable_audio_route(struct audio_device *adev,
     audio_extn_sound_trigger_update_stream_status(usecase, ST_EVENT_STREAM_BUSY);
     audio_extn_listen_update_stream_status(usecase, LISTEN_EVENT_STREAM_BUSY);
     audio_extn_utils_send_app_type_cfg(adev, usecase);
+#ifdef ELLIPTIC_ULTRASOUND_ENABLED
+    if (usecase->id != USECASE_AUDIO_ULTRASOUND_RX &&
+        usecase->id != USECASE_AUDIO_ULTRASOUND_TX)
+#endif
     audio_extn_utils_send_audio_calibration(adev, usecase);
     strlcpy(mixer_path, use_case_table[usecase->id], MIXER_PATH_MAX_LENGTH);
     platform_add_backend_name(mixer_path, snd_device, usecase);
@@ -1039,6 +1046,7 @@ static void check_usecases_codec_backend(struct audio_device *adev,
     snd_device_t derive_snd_device[AUDIO_USECASE_MAX];
     int i, num_uc_to_switch = 0;
     int status = 0;
+    bool match = false;
     bool force_restart_session = false;
     /*
      * This function is to make sure that all the usecases that are active on
@@ -1078,13 +1086,14 @@ static void check_usecases_codec_backend(struct audio_device *adev,
 
     list_for_each(node, &adev->usecase_list) {
         usecase = node_to_item(node, struct audio_usecase, list);
+        match = platform_check_backends_match(snd_device, usecase->out_snd_device);
 
         ALOGD("%s:becf: (%d) check_usecases curr device: %s, usecase device:%s "
             "backends match %d",__func__, i,
               platform_get_snd_device_name(snd_device),
               platform_get_snd_device_name(usecase->out_snd_device),
-              platform_check_backends_match(snd_device, usecase->out_snd_device));
-        if ((usecase->type != PCM_CAPTURE) && (usecase != uc_info)) {
+              match);
+        if (match && (usecase->type != PCM_CAPTURE) && (usecase != uc_info)) {
             uc_derive_snd_device = derive_playback_snd_device(adev->platform,
                                                usecase, uc_info, snd_device);
             if (((uc_derive_snd_device != usecase->out_snd_device) || force_routing) &&
@@ -1094,7 +1103,7 @@ static void check_usecases_codec_backend(struct audio_device *adev,
                 (usecase->devices & AUDIO_DEVICE_OUT_ALL_A2DP) ||
                 (usecase->devices & AUDIO_DEVICE_OUT_ALL_SCO)) &&
                 ((force_restart_session) ||
-                (platform_check_backends_match(snd_device, usecase->out_snd_device)))) {
+                match)) {
                 ALOGD("%s:becf: check_usecases (%s) is active on (%s) - disabling ..",
                     __func__, use_case_table[usecase->id],
                       platform_get_snd_device_name(usecase->out_snd_device));
@@ -4839,6 +4848,15 @@ static int adev_set_parameters(struct audio_hw_device *dev, const char *kvpairs)
         }
     }
 
+    ret = str_parms_get_int(parms, "ultrasound-sensor", &val);
+    if (ret >= 0) {
+        if (val == 1) {
+            us_start();
+        } else {
+            us_stop();
+        }
+    }
+
     audio_extn_set_parameters(adev, parms);
 done:
     str_parms_destroy(parms);
@@ -5298,6 +5316,9 @@ static int adev_close(hw_device_t *device)
         free(device);
         adev = NULL;
     }
+
+    us_deinit();
+
     pthread_mutex_unlock(&adev_init_lock);
 
     return 0;
@@ -5506,6 +5527,9 @@ static int adev_open(const hw_module_t *module, const char *name,
     adev->vr_audio_mode_enabled = false;
 
     audio_extn_ds2_enable(adev);
+
+    us_init(adev);
+
     *device = &adev->device.common;
 
     audio_extn_utils_update_streams_cfg_lists(adev->platform, adev->mixer,
